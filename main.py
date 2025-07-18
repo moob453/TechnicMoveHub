@@ -6,14 +6,11 @@ from time import sleep
 def main():
      
      hub = movehub2()
-     hub.connect(2)
-     hub.set_led_color("red")
-     sleep(1)
-     hub.set_led_color("green")
-     sleep(1)
-     hub.set_led_color("blue")
-     sleep(2)
-     hub.disconnect()
+     hub.connect(4)
+     hub.led("red")
+     hub.motor('motor_A', 'speed', 100)
+     hub.motor('motor_b', 'speed', -100)
+     sleep(4)
 
 if __name__ == "__main__":
     main()

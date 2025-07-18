@@ -38,7 +38,15 @@ class movehub2:
         orange=0x08,
         red=0x09,
     )
-    
+    MOTOR_NAMES = dict(
+        motor_a=0x32, # Changed to lowercase to match processing
+        motor_b=0x33,
+        motor_c=0x34,
+    )
+    MOTOR_TYPE = dict(
+        power=0x00,
+        speed=0x00,
+    )
     def __init__(self):
         self._client: BleakClient = None
         self._loop: asyncio.AbstractEventLoop = None
@@ -215,7 +223,7 @@ class movehub2:
         # _async_send_raw_command handles the error message and exit.
         return self._run_async_in_thread(self._async_send_raw_command(*args))
 
-    def set_led_color(self, color_name: str):
+    def led(self, color_name: str):
         """
         Sets the LED color of the hub using a predefined dictionary of colors.
         Args:
@@ -248,3 +256,69 @@ class movehub2:
         # If _async_send_raw_command is called within it and finds no connection,
         # it will print the message and exit the program.
         self._run_async_in_thread(_set_led_color_async_internal())
+
+
+ #funtion for motor control
+    def motor(self, motor_name: str, type: str, value: int):
+        """
+        Sets the motor controlled and its value.
+        Args:
+            motor_name (str): name can be "motor A", "motor B" or "motor C".
+            The type can be either power or speed. Both control continuous motor power.
+            The value can be between -100 (full reverse) and 100 (full forward), 0 to stop.
+        """
+
+        async def _motor_async_internal():
+            # Standardize motor_name to match dictionary keys (e.g., "motor A" -> "motor_a")
+            processed_motor_name = motor_name.lower().replace(" ", "_")
+            motor_port = self.MOTOR_NAMES.get(processed_motor_name)
+            
+            # Validate if the motor name is valid
+            if motor_port is None:
+                logger.error(f"Error: Invalid motor name '{motor_name}'. Available names: {', '.join(self.MOTOR_NAMES.keys())}")
+                return # Exit the async function if motor name is invalid
+
+            # Validate type and get its corresponding byte value (0x00 for both 'power' and 'speed' in your setup)
+            processed_type = type.lower()
+            motor_control_mode_byte = self.MOTOR_TYPE.get(processed_type)
+            
+            if motor_control_mode_byte is None:
+                logger.error(f"Error: Invalid motor control type '{type}'. Must be 'power' or 'speed'.")
+                return # Exit if type is invalid
+            
+            # Validate and convert value to integer, handling potential errors
+            try:
+                motor_value = int(value)
+            except ValueError:
+                logger.error(f"Error: Motor value '{value}' is not a valid integer.")
+                return # Exit if value is not an integer
+
+            # Validate motor value range (-100 to 100)
+            if not (-100 <= motor_value <= 100):
+                logger.error(f"Error: Motor value {motor_value} is out of range. Must be between -100 and 100.")
+                return # Exit if value is out of range
+
+            # --- NEW LOGIC FOR INVERTING MOTOR_A SPEED ---
+            if processed_motor_name == "motor_a":
+                logger.debug(f"Inverting speed for motor_A: {motor_value} -> {-motor_value}")
+                motor_value = -motor_value
+            # --- END NEW LOGIC ---
+
+            # --- Convert motor_value to unsigned 8-bit byte before sending ---
+            # This ensures negative values are correctly represented as two's complement (0-255)
+            # which bytearray can handle, and the BLE hub will interpret as signed.
+            motor_value_byte = motor_value & 0xFF
+            # --- END LOGIC ---
+
+            # Send the raw command to set motor power/speed.
+            success = await self._async_send_raw_command(
+                0x08, 0x00, 0x81, motor_port, 0x11, 0x51, motor_control_mode_byte, motor_value_byte # Use motor_value_byte here
+            )
+
+            if success:
+                logger.info(f"Successfully set {processed_type} for {motor_name} to {value} (sent as {motor_value_byte})")
+            else:
+                logger.error(f"Failed to set {processed_type} for {motor_name}. Check logs for details.")
+            
+        # Run the asynchronous motor control logic in the background thread.
+        self._run_async_in_thread(_motor_async_internal())
